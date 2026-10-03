@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: adamcik/nix-tooling/actions/nix-setup@03474cbd37cedc82f533d69a65cdd23237b5798e
+      - run: nix fmt -- --ci
+      - run: nix flake check

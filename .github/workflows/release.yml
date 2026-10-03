@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact: ${{ steps.build.outputs.artifact-name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: adamcik/nix-tooling/actions/nix-setup@03474cbd37cedc82f533d69a65cdd23237b5798e
+      - run: nix fmt -- --ci
+      - run: nix flake check
+      - uses: hynek/build-and-inspect-python-package@d44ca7d91762de7a7d5436ddae667c6da6d1c3df # v2
+        id: build
+        with:
+          python-version: "3.12"
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DIST_DIR: ${{ steps.build.outputs.dist }}
+        run: nix develop --command python scripts/check-release.py
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pytest-sentry-capture/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1

@@ -1,0 +1,56 @@
+[project]
+name = "pytest-sentry-capture"
+description = "Pytest fixtures and inspection helpers for captured Sentry events"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Thomas Adamcik", email = "thomas@adamcik.no" }]
+keywords = ["pytest", "sentry", "testing", "observability"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: Pytest",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+dynamic = ["version"]
+dependencies = ["pytest>=9,<10", "sentry-sdk>=2.64,<3"]
+
+[project.urls]
+Homepage = "https://github.com/adamcik/pytest-sentry-capture"
+Issues = "https://github.com/adamcik/pytest-sentry-capture/issues"
+Repository = "https://github.com/adamcik/pytest-sentry-capture"
+
+[project.entry-points.pytest11]
+sentry_capture = "pytest_sentry_capture"
+
+[dependency-groups]
+dev = ["basedpyright", "build", "editables", "hatch-vcs", "hatchling", "packaging", "pytest-xdist", "ruff", "twine"]
+
+[build-system]
+requires = ["editables>=0.6,<0.7", "hatch-vcs>=0.5,<0.6", "hatchling>=1.30.1,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "^v(?P<version>.+)$"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytest_sentry_capture"]
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+include = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
