@@ -25,7 +25,7 @@ jobs:
       - uses: adamcik/nix-tooling/actions/nix-setup@03474cbd37cedc82f533d69a65cdd23237b5798e
       - run: nix fmt -- --ci
       - run: nix flake check
-      - uses: hynek/build-and-inspect-python-package@d44ca7d91762de7a7d5436ddae667c6da6d1c3df # v2
+      - uses: hynek/build-and-inspect-python-package@8219e97fa5848d0e0fb514054f36a08467416828 # main
         id: build
         with:
           python-version: "3.12"
