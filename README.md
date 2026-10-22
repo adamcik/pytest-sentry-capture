@@ -26,19 +26,24 @@ def test_error(sentry_capture: capture.SentryCapture) -> None:
 
 ## Fixtures and inspection
 
-- `sentry_capture`: isolated client with in-memory transport and full transaction
+- `sentry_capture`: fixture-owned client with in-memory transport and full transaction
   sampling; yields a `SentryCapture`.
 - `sentry_transport`: a `FakeTransport` you can inject into application setup.
-- `sentry_isolation_scope`: an isolated, blank client for tests that own SDK setup.
+- `sentry_isolation_scope`: a clean SDK test environment for application-owned setup.
+  Starts with no active client or inherited scope tags/breadcrumbs; restores the
+  previous global client and enclosing current/isolation scopes on exit.
 
 Use `get_events`, `get_transactions`, `get_spans`, `get_breadcrumbs`, and
 `get_exceptions` to iterate captured data. Reads flush the active client and do not
 consume captured envelopes. The `find_*` methods return the first match or raise
 `LookupError`. Each test receives fresh envelopes.
 
-Fixture teardown closes its own client inside the isolated scope and restores the
-enclosing scope. If application code creates another client, it owns that client's
-cleanup. These fixtures isolate the SDK scope, not process-global logging handlers or
+Fixture teardown closes only its own client. If application code creates another client,
+it owns that client's flush and cleanup, even when application setup fails. The
+`sentry_transport` fixture alone does not change SDK state: request
+`sentry_isolation_scope` too when initializing your application. Despite its historical
+name, that environment temporarily changes global scope context and the global client.
+It does not undo global event processors, process-global logging handlers or
 arbitrary framework instrumentation. Use xdist for process-level parallelism; concurrent
 SDK reconfiguration within a worker is unsupported.
 

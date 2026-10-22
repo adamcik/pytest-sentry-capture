@@ -1,32 +1,30 @@
 """Opt-in fixtures: plugin discovery itself does not initialize the SDK."""
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 
 import pytest
 import sentry_sdk
+from sentry_sdk.scope import use_isolation_scope, use_scope
 
 from ._capture import FakeTransport, SentryCapture
 
 
 @pytest.fixture
 def sentry_isolation_scope() -> Iterator[None]:
-    """Restore the enclosing scope and close only the client this fixture owns."""
-    with sentry_sdk.isolation_scope():
-        scope = sentry_sdk.get_global_scope()
-        previous = scope.client
-        client = sentry_sdk.Client(dsn="", default_integrations=False)
-        scope.set_client(client)
-        try:
-            yield
-        finally:
-            try:
-                client.close()
-            finally:
-                scope.set_client(previous)
+    """A clean SDK test environment, including global-client restoration.
+
+    Application-created clients remain application-owned. Scope context is reset,
+    but process-global integrations and concurrent SDK reconfiguration are not
+    isolated. Despite the historical name, this changes the global scope too.
+    """
+    with _sdk_test_environment():
+        yield
 
 
 @pytest.fixture
 def sentry_transport() -> FakeTransport:
+    """Record application-owned telemetry; does not initialize or isolate Sentry."""
     return FakeTransport()
 
 
@@ -34,7 +32,7 @@ def sentry_transport() -> FakeTransport:
 def sentry_capture(
     sentry_transport: FakeTransport, sentry_isolation_scope: None
 ) -> Iterator[SentryCapture]:
-    """Capture events and all sampled transactions in an isolated SDK scope."""
+    """Own a client in a clean SDK test environment, with full trace sampling."""
     scope = sentry_sdk.get_global_scope()
     previous = scope.client
     client = sentry_sdk.Client(
@@ -49,3 +47,18 @@ def sentry_capture(
             client.close()
         finally:
             scope.set_client(previous)
+
+
+@contextmanager
+def _sdk_test_environment() -> Generator[None]:
+    scope = sentry_sdk.get_global_scope()
+    previous = scope.fork()
+    with use_isolation_scope(sentry_sdk.Scope()), use_scope(sentry_sdk.Scope()):
+        scope.clear()
+        scope.set_client(None)
+        try:
+            yield
+        finally:
+            scope.clear()
+            scope.client = previous.client
+            scope.update_from_scope(previous)
