@@ -41,7 +41,7 @@ def sentry_capture(
     )
     scope.set_client(client)
     try:
-        yield SentryCapture(sentry_transport.captured_envelopes)
+        yield SentryCapture(sentry_transport.captured_envelopes, client=client)
     finally:
         try:
             client.close()

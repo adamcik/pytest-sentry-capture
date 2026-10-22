@@ -33,10 +33,16 @@ def test_error(sentry_capture: capture.SentryCapture) -> None:
   Starts with no active client or inherited scope tags/breadcrumbs; restores the
   previous global client and enclosing current/isolation scopes on exit.
 
-Use `get_events`, `get_transactions`, `get_spans`, `get_breadcrumbs`, and
-`get_exceptions` to iterate captured data. Reads flush the active client and do not
-consume captured envelopes. The `find_*` methods return the first match or raise
+Use `sentry_transport.capture` for application-owned inspection, or the capture yielded
+by `sentry_capture`. Both offer `get_events`, `get_transactions`, `get_spans`,
+`get_breadcrumbs`, and `get_exceptions`. Reads are passive and do not consume captured
+envelopes. The `find_*` methods return the first match or raise
 `LookupError`. Each test receives fresh envelopes.
+
+Finish transactions and await tasks or join background work before flushing. Use
+`sentry_capture.flush()` for the fixture-owned client, or your application client's
+`flush()` for injected transports. Flushing drains SDK buffers, not unfinished work.
+Transport-only captures cannot infer a client and raise `RuntimeError` on `flush()`.
 
 Fixture teardown closes only its own client. If application code creates another client,
 it owns that client's flush and cleanup, even when application setup fails. The
@@ -46,6 +52,13 @@ name, that environment temporarily changes global scope context and the global c
 It does not undo global event processors, process-global logging handlers or
 arbitrary framework instrumentation. Use xdist for process-level parallelism; concurrent
 SDK reconfiguration within a worker is unsupported.
+
+## Compatibility changes (unreleased)
+
+- Inspection no longer implicitly flushes the active SDK client. Call the appropriate
+  client's flush explicitly before inspecting buffered telemetry such as SDK logs.
+- `sentry_isolation_scope` starts with clean scope context and no active client rather
+  than inheriting context or constructing a blank SDK client.
 
 ## Development
 
