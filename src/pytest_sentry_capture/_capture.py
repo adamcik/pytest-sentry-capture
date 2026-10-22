@@ -1,4 +1,4 @@
-"""Envelope-backed capture; reads flush the active SDK client first."""
+"""Passive envelope inspection, separate from client lifetime and flushing."""
 
 from collections.abc import Iterator
 from typing import Any, cast, override
@@ -13,6 +13,7 @@ class FakeTransport(transport.Transport):
     def __init__(self) -> None:
         super().__init__()
         self.captured_envelopes: list[envelope.Envelope] = []
+        self.capture = SentryCapture(self.captured_envelopes)
 
     @override
     def capture_envelope(self, envelope: envelope.Envelope) -> None:
@@ -20,20 +21,42 @@ class FakeTransport(transport.Transport):
 
 
 class SentryCapture:
-    """A live view of envelopes, preserving their capture order on each read."""
+    """A live, non-consuming view of data already handed to a transport.
 
-    def __init__(self, envelopes: list[envelope.Envelope]) -> None:
+    Reads never flush. An optional client binds explicit flushing, not ownership:
+    this view never closes clients. Convenience readers are partial views; use
+    envelopes for exhaustive inspection. Returned dictionaries remain mutable.
+    """
+
+    def __init__(
+        self,
+        envelopes: list[envelope.Envelope],
+        *,
+        client: sentry_sdk.Client | None = None,
+    ) -> None:
         self.envelopes = envelopes
+        self._client = client
+
+    def flush(self, timeout: float | None = None) -> None:
+        """Flush the bound client, never the active client.
+
+        Finish transactions and await/join application work first. Flushing only
+        drains SDK buffers; it cannot complete unfinished application work.
+        Transport-only views have no client: flush the application client instead.
+        """
+        if self._client is None:
+            raise RuntimeError(
+                "No bound client; flush your application client explicitly."
+            )
+        self._client.flush(timeout=timeout)
 
     def get_events(self) -> Iterator[dict[str, Any]]:
-        sentry_sdk.flush()
         for item in self.envelopes:
             event = item.get_event()
             if event is not None:
                 yield cast(dict[str, Any], event)
 
     def get_transactions(self) -> Iterator[dict[str, Any]]:
-        sentry_sdk.flush()
         for item in self.envelopes:
             event = item.get_transaction_event()
             if event is not None:
