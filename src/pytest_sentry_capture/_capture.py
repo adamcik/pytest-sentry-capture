@@ -1,14 +1,32 @@
 """Passive envelope inspection, separate from client lifetime and flushing."""
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, cast, override
 
 import sentry_sdk
 from sentry_sdk import envelope, transport
 
 
+@dataclass(frozen=True)
+class CapturedAttachment:
+    """An attachment's common metadata and bytes, materialized when inspected.
+
+    Custom headers remain available on the original envelope item. File-backed
+    payloads must be read while their source file is still available.
+    """
+
+    filename: str | None
+    content_type: str | None
+    data: bytes
+
+
 class FakeTransport(transport.Transport):
-    """An in-memory transport suitable for injection into application setup."""
+    """Record envelopes handed to this transport after applicable SDK processing.
+
+    Does not prevent other clients, integrations, or network paths from sending.
+    Envelopes are retained by reference, not serialized at capture time.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,18 +69,21 @@ class SentryCapture:
         self._client.flush(timeout=timeout)
 
     def get_events(self) -> Iterator[dict[str, Any]]:
+        """Error and message events only; not exhaustive telemetry inspection."""
         for item in self.envelopes:
             event = item.get_event()
             if event is not None:
                 yield cast(dict[str, Any], event)
 
     def get_transactions(self) -> Iterator[dict[str, Any]]:
+        """Completed, sampled transaction events, including root trace context."""
         for item in self.envelopes:
             event = item.get_transaction_event()
             if event is not None:
                 yield cast(dict[str, Any], event)
 
     def get_spans(self) -> Iterator[dict[str, Any]]:
+        """Child spans embedded in transactions, not roots or standalone items."""
         for transaction in self.get_transactions():
             for span in transaction.get("spans", []):
                 if isinstance(span, dict):
@@ -75,6 +96,29 @@ class SentryCapture:
     def get_exceptions(self) -> Iterator[dict[str, Any]]:
         for event in self.get_events():
             yield from event.get("exception", {}).get("values", [])
+
+    def get_logs(self) -> Iterator[dict[str, Any]]:
+        """Individual structured SDK logs, flattened from captured log batches.
+
+        Requires SDK logs to be enabled and their owning client to be flushed.
+        These are not Python log records or event breadcrumbs.
+        """
+        for captured in self.envelopes:
+            for item in captured:
+                if item.type == "log":
+                    payload = cast(dict[str, Any], item.payload.json)
+                    yield from payload["items"]
+
+    def get_attachments(self) -> Iterator[CapturedAttachment]:
+        """Attachment bytes and common metadata; does not decode their contents."""
+        for captured in self.envelopes:
+            for item in captured:
+                if item.type == "attachment":
+                    yield CapturedAttachment(
+                        filename=item.headers.get("filename"),
+                        content_type=item.headers.get("content_type"),
+                        data=item.get_bytes(),
+                    )
 
     def find_transaction_by_name(self, name: str) -> dict[str, Any]:
         for transaction in self.get_transactions():
