@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 import pytest
 import sentry_sdk
-from sentry_sdk.scope import use_isolation_scope, use_scope
+from sentry_sdk import scope as sdk_scope
 
 from ._capture import FakeTransport, SentryCapture
 
@@ -39,26 +39,29 @@ def sentry_capture(
         transport=sentry_transport,
         traces_sample_rate=1.0,
     )
-    scope.set_client(client)
     try:
+        scope.set_client(client)
         yield SentryCapture(sentry_transport.captured_envelopes, client=client)
     finally:
         try:
             client.close()
         finally:
-            scope.set_client(previous)
+            scope.client = previous
 
 
 @contextmanager
 def _sdk_test_environment() -> Generator[None]:
-    scope = sentry_sdk.get_global_scope()
-    previous = scope.fork()
-    with use_isolation_scope(sentry_sdk.Scope()), use_scope(sentry_sdk.Scope()):
-        scope.clear()
-        scope.set_client(None)
-        try:
+    # The SDK has no public global-scope context manager. Replace its reference
+    # rather than merging a snapshot: clear()/update_from_scope() lose state such
+    # as session-tracking policy. Restore the original object without mutating it.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            sdk_scope, "_global_scope", sentry_sdk.Scope(ty=sdk_scope.ScopeType.GLOBAL)
+        )
+        with (
+            sdk_scope.use_isolation_scope(
+                sentry_sdk.Scope(ty=sdk_scope.ScopeType.ISOLATION)
+            ),
+            sdk_scope.use_scope(sentry_sdk.Scope(ty=sdk_scope.ScopeType.CURRENT)),
+        ):
             yield
-        finally:
-            scope.clear()
-            scope.client = previous.client
-            scope.update_from_scope(previous)
