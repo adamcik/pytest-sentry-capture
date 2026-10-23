@@ -151,10 +151,11 @@ as `[event] = recorded.get_events()` does above.
 | `sentry_capture`         | Uses that clean environment, creates a client with full transaction sampling, and yields a `SentryCapture` bound to that client for flushing. Closes its own client at teardown.                 |
 
 The historical name `sentry_isolation_scope` means more than a context-local scope: it
-temporarily changes the **global** client and global scope context as well. Nested
-environments restore their enclosing state. Application code owns the flushing and
-closing of clients it creates, including cleanup when application setup fails. The
-fixtures never close a pre-existing client or an application-created replacement.
+temporarily replaces the **global** scope as well. Nested environments restore the
+original scope objects, including their clients and session-tracking policy. Application
+code owns the flushing and closing of clients it creates, including cleanup when
+application setup fails. The fixtures never close a pre-existing client or an
+application-created replacement.
 
 Finish transactions, await async tasks, and join background work **before** flushing and
 inspecting. `sentry_capture.flush(timeout=...)` always flushes its bound client, even if
@@ -171,6 +172,11 @@ xdist's separate worker processes for process-level parallelism. Global event
 processors, logging handlers, integration installation, and arbitrary framework
 instrumentation are not reset or undone by these fixtures.
 
+The SDK has no public global-scope context manager, so this fixture temporarily replaces
+its internal global-scope reference. Code that cached an enclosing scope object can
+still mutate or use that object: cached references are not redirected to the test's
+scope. Use SDK scope accessors inside the active test environment.
+
 ## What capture proves—and does not prove
 
 `FakeTransport.capture_envelope` records what the SDK hands to **this transport** after
@@ -184,7 +190,7 @@ or the absence of traffic from another client, an integration's separate network
 or other application code. This plugin is neither a runtime redaction library nor a
 process-wide network sandbox.
 
-## Compatibility changes (unreleased)
+## Compatibility changes in 0.2.0
 
 - Readers no longer implicitly flush the active client. Flush the appropriate client
   explicitly before inspecting buffered telemetry such as SDK logs.
@@ -193,6 +199,8 @@ process-wide network sandbox.
 - Existing imports, constructor calls, partial readers, mutable event views, and
   first-match selectors remain supported. Log/attachment readers, transport `.capture`,
   and explicitly bound flushing are additive.
+
+See [the 0.2.0 release notes](CHANGELOG.md) for migration guidance.
 
 ## Development
 

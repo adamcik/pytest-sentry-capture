@@ -39,6 +39,11 @@ def test_reads_are_passive_and_flush_targets_bound_client(
 
         assert list(capture.get_events()) == []
         assert list(capture.get_transactions()) == []
+        assert list(capture.get_spans()) == []
+        assert list(capture.get_breadcrumbs()) == []
+        assert list(capture.get_exceptions()) == []
+        list(capture.get_logs())
+        assert list(capture.get_attachments()) == []
         assert owner.flush_timeouts == []
         assert other.flush_timeouts == []
 

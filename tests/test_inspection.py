@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import sentry_sdk
-from sentry_sdk.envelope import Envelope, Item
+from sentry_sdk.envelope import Envelope, Item, PayloadRef
 
 from pytest_sentry_capture import CapturedAttachment, FakeTransport, SentryCapture
 
@@ -88,3 +88,57 @@ def test_unknown_items_remain_available_in_raw_envelopes() -> None:
     assert list(transport.capture.get_logs()) == []
     assert list(transport.capture.get_attachments()) == []
     assert b"invented-secret" in captured.serialize()
+
+
+def test_all_readers_are_non_consuming_partial_views() -> None:
+    captured = Envelope(
+        headers={"test-header": "invented-header-secret"},
+        items=[
+            Item(
+                type="event",
+                payload=PayloadRef(
+                    json={
+                        "message": "diagnostic",
+                        "breadcrumbs": {"values": [{"message": "started"}]},
+                        "exception": {"values": [{"type": "ValueError"}]},
+                    }
+                ),
+            ),
+            Item(
+                type="transaction",
+                payload=PayloadRef(
+                    json={
+                        "transaction": "operation",
+                        "spans": [{"op": "work"}],
+                    }
+                ),
+            ),
+            Item(
+                type="log",
+                payload=PayloadRef(
+                    json={
+                        "items": [{"body": "structured diagnostic"}],
+                    }
+                ),
+            ),
+            Item(type="attachment", filename="test.txt", payload=b"diagnostic bytes"),
+        ],
+    )
+    capture = SentryCapture([captured])
+    snapshot = captured.serialize()
+    for reader in (
+        capture.get_events,
+        capture.get_transactions,
+        capture.get_spans,
+        capture.get_breadcrumbs,
+        capture.get_exceptions,
+        capture.get_logs,
+        capture.get_attachments,
+    ):
+        first = list(reader())
+        assert len(first) == 1
+        assert list(reader()) == first
+    assert capture.envelopes == [captured]
+    assert captured.serialize() == snapshot
+    assert b"invented-header-secret" in snapshot
+    assert b"diagnostic bytes" in snapshot
