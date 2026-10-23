@@ -3,6 +3,7 @@
 import pytest
 import sentry_sdk
 from sentry_sdk.scope import use_isolation_scope, use_scope
+from sentry_sdk.sessions import track_session
 
 from pytest_sentry_capture import FakeTransport, SentryCapture
 from pytest_sentry_capture._plugin import _sdk_test_environment
@@ -74,7 +75,8 @@ def test_environment_restores_after_application_initialization_failure() -> None
                     raise RuntimeError("application setup")
             assert sentry_sdk.get_client() is outer
             assert outer.is_active()
-            assert application is not None and application.is_active()
+            assert outer.transport is not None
+            assert application is not None and application.transport is not None
         finally:
             if application is not None:
                 application.close()
@@ -91,6 +93,7 @@ def test_environment_restores_when_sdk_initialization_raises() -> None:
                     sentry_sdk.init(dsn="invalid", default_integrations=False)
             assert sentry_sdk.get_client() is outer
             assert outer.is_active()
+            assert outer.transport is not None
         finally:
             outer.close()
 
@@ -102,3 +105,49 @@ def test_environment_preserves_absence_of_global_client() -> None:
         with _sdk_test_environment():
             assert not sentry_sdk.get_client().is_active()
         assert scope.client is None
+
+
+@pytest.mark.parametrize("exit_mode", ["normal", "failure", "nested"])
+def test_environment_restores_global_session_tracking_policy(exit_mode: str) -> None:
+    with _sdk_test_environment():
+        transport = FakeTransport()
+        client = sentry_sdk.Client(
+            transport=transport,
+            release="scope-restoration-test@1.0",
+            auto_session_tracking=True,
+            default_integrations=False,
+        )
+        scope = sentry_sdk.get_global_scope()
+        scope.set_client(client)
+        scope.stop_auto_session_tracking()
+        try:
+            try:
+                with _sdk_test_environment():
+                    if exit_mode == "failure":
+                        raise RuntimeError("setup failed")
+                    if exit_mode == "nested":
+                        with _sdk_test_environment():
+                            pass
+            except RuntimeError:
+                assert exit_mode == "failure"
+
+            assert sentry_sdk.get_global_scope() is scope
+            assert scope.client is client
+            assert client.is_active()
+            with track_session(scope):
+                pass
+            client.flush()
+            assert transport.captured_envelopes == []
+
+            # Prove the missing sessions reflect policy, not a disabled recorder.
+            scope.resume_auto_session_tracking()
+            with track_session(scope):
+                pass
+            client.flush()
+            assert any(
+                item.type in {"session", "sessions"}
+                for envelope in transport.captured_envelopes
+                for item in envelope
+            )
+        finally:
+            client.close()
