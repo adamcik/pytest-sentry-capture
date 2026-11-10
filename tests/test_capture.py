@@ -79,7 +79,8 @@ def test_missing_lookup(
 
 @pytest.mark.parametrize("iteration", range(2))
 def test_each_test_starts_empty(
-    iteration: int, sentry_capture: capture.SentryCapture
+    iteration: int,
+    sentry_capture: capture.SentryCapture,
 ) -> None:
     assert list(sentry_capture.get_events()) == []
     sentry_sdk.capture_message(str(iteration))
@@ -96,5 +97,5 @@ def test_transport_can_be_injected(sentry_transport: capture.FakeTransport) -> N
             sentry_sdk.capture_message("injected")
         finally:
             client.close()
-    view = capture.SentryCapture(sentry_transport.captured_envelopes)
+    view = sentry_transport.capture
     assert next(view.get_events())["message"] == "injected"
