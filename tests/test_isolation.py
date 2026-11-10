@@ -5,7 +5,7 @@ import sentry_sdk
 from sentry_sdk.scope import use_isolation_scope, use_scope
 from sentry_sdk.sessions import track_session
 
-from pytest_sentry_capture import FakeTransport, SentryCapture
+from pytest_sentry_capture import FakeTransport
 from pytest_sentry_capture._plugin import _sdk_test_environment
 
 
@@ -34,9 +34,7 @@ def test_environment_clears_and_restores_all_scope_context() -> None:
                     sentry_sdk.get_global_scope().set_client(inner)
                     try:
                         sentry_sdk.capture_message("clean")
-                        [event] = SentryCapture(
-                            inner_transport.captured_envelopes
-                        ).get_events()
+                        [event] = inner_transport.capture.get_events()
                         assert not event.get("tags")
                         assert not event.get("breadcrumbs", {}).get("values")
                         sentry_sdk.set_tag("inner", "must not escape")
@@ -47,7 +45,7 @@ def test_environment_clears_and_restores_all_scope_context() -> None:
                 assert sentry_sdk.get_isolation_scope() is isolation
                 assert sentry_sdk.get_client() is client
                 sentry_sdk.capture_message("restored")
-                [event] = SentryCapture(transport.captured_envelopes).get_events()
+                [event] = transport.capture.get_events()
                 assert event["tags"] == {
                     "global": "outer",
                     "current": "outer",

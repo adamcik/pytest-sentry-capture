@@ -1,8 +1,10 @@
 # pytest-sentry-capture
 
-Test what your application hands to Sentry's transport after SDK processing. Replace the
-transport in your application's real Sentry initialization, exercise the application,
-and inspect events, traces, SDK logs, and attachments in pytest.
+pytest-sentry-capture is a pytest plugin for testing your application's Sentry
+integration. Inject its in-memory transport to inspect SDK-processed errors, traces,
+logs, and attachments without delivering them to Sentry. Use it to verify that your
+Sentry configuration produces useful diagnostics and applies the filtering and redaction
+you expect.
 
 Requires Python 3.12 or newer.
 
@@ -13,6 +15,32 @@ pip install pytest-sentry-capture
 Pytest discovers the plugin automatically. Do not also add it to `pytest_plugins`.
 Plugin discovery alone does not initialize Sentry.
 
+## Quick start
+
+Request `sentry_capture` to initialize an isolated SDK client with an in-memory
+transport and inspect its output. The default setup enables full transaction sampling;
+the client is closed after the test. No fixture is autouse.
+
+Call `sentry_capture.flush()` to drain that client's SDK buffers before inspection. It
+returns the capture for chaining; readers such as `get_events()` never flush.
+
+```python
+import sentry_sdk
+
+
+def test_sdk_message(sentry_capture):
+    sentry_sdk.capture_message("hello")
+
+    [event] = sentry_capture.flush().get_events()
+    assert event["message"] == "hello"
+```
+
+Finish application work, then flush the client before inspecting buffered telemetry.
+This setup exercises SDK behavior, not your application's Sentry configuration. For
+application integration tests, override `initialize_sentry_client` as shown below. The
+same capture exposes `.client` for direct SDK access and `.transport` for raw envelopes;
+its flush target does not change if another client becomes active.
+
 ## Test your application's Sentry configuration
 
 The transport records; the client processes; scopes supply context. For an application
@@ -22,7 +50,9 @@ application setup; in your project, import and call the real setup function inst
 redaction policy here belongs to the application, not this plugin.
 
 ```python
+import pytest
 import sentry_sdk
+from sentry_sdk import logger
 import pytest_sentry_capture as capture
 
 
@@ -41,46 +71,47 @@ def initialize_application_sentry(*, transport):
         before_send=before_send,
         enable_logs=True,
     )
-    return sentry_sdk.get_client()
+
+
+@pytest.fixture
+def initialize_sentry_client(
+    sentry_transport: capture.FakeTransport, sentry_isolation_scope: None
+) -> None:
+    """Override only initialization; the library still owns client cleanup."""
+    initialize_application_sentry(transport=sentry_transport)
 
 
 def test_application_privacy(
-    sentry_transport: capture.FakeTransport, sentry_isolation_scope: None
+    sentry_capture: capture.SentryCapture
 ) -> None:
     email = "invented-secret@example.invalid"
     authorization = "invented-bearer-secret-123"
-    client = initialize_application_sentry(transport=sentry_transport)
-    try:
-        # In a real application test, invoke the application operation here.
-        sentry_sdk.add_breadcrumb(message="checkout started")
-        sentry_sdk.set_extra("email", email)
-        sentry_sdk.set_extra("authorization", authorization)
-        sentry_sdk.get_isolation_scope().add_attachment(
-            bytes=b"order-42: payment declined", filename="diagnostic.txt"
-        )
-        sentry_sdk.capture_message("checkout failed", level="error")
-        sentry_sdk.logger.info("checkout finished")
+    # In a real application test, invoke the application operation here.
+    sentry_sdk.add_breadcrumb(message="checkout started")
+    sentry_sdk.set_extra("email", email)
+    sentry_sdk.set_extra("authorization", authorization)
+    sentry_sdk.get_isolation_scope().add_attachment(
+        bytes=b"order-42: payment declined", filename="diagnostic.txt"
+    )
+    sentry_sdk.capture_message("checkout failed", level="error")
+    logger.info("checkout finished")
 
-        # Finish transactions and await/join application work before flushing.
-        client.flush()
-        recorded = sentry_transport.capture
-        [event] = recorded.get_events()
-        assert event["message"] == "checkout failed"
-        assert event["release"] == "example-app@1.0"
-        assert recorded.find_breadcrumb_by_message("checkout started")
-        assert any(log["body"] == "checkout finished" for log in recorded.get_logs())
-        [attachment] = recorded.get_attachments()
-        assert attachment.filename == "diagnostic.txt"
-        assert attachment.data == b"order-42: payment declined"
+    # Finish transactions and await/join application work before flushing.
+    [event] = sentry_capture.flush().get_events()
+    assert event["message"] == "checkout failed"
+    assert event["release"] == "example-app@1.0"
+    assert sentry_capture.find_breadcrumb_by_message("checkout started")
+    assert any(log["body"] == "checkout finished" for log in sentry_capture.get_logs())
+    [attachment] = sentry_capture.get_attachments()
+    assert attachment.filename == "diagnostic.txt"
+    assert attachment.data == b"order-42: payment declined"
 
-        # Include ALL envelope headers and payloads, not just the event view.
-        snapshot = tuple(envelope.serialize() for envelope in recorded.envelopes)
-        assert snapshot  # Empty capture is not successful redaction.
-        for serialized in snapshot:
-            assert email.encode() not in serialized
-            assert authorization.encode() not in serialized
-    finally:
-        client.close()
+    # Include ALL envelope headers and payloads, not just the event view.
+    snapshot = tuple(envelope.serialize() for envelope in sentry_capture.envelopes)
+    assert snapshot  # Empty capture is not successful redaction.
+    for serialized in snapshot:
+        assert email.encode() not in serialized
+        assert authorization.encode() not in serialized
 ```
 
 These positive assertions matter: a `before_send` callback that raises or returns `None`
@@ -90,27 +121,6 @@ absent secrets could pass without testing any useful output.
 The byte checks above detect the invented literal values in this example. Encoded,
 compressed, or application-specific payloads need appropriate decoding and assertions;
 this is not a general-purpose privacy scanner.
-
-## Simpler SDK-level tests
-
-Use `sentry_capture` when you want the fixture to create the client. It enables full
-transaction sampling but does **not** exercise your application's initialization,
-configuration, or hooks.
-
-```python
-import sentry_sdk
-import pytest_sentry_capture as capture
-
-
-def test_sdk_message(sentry_capture: capture.SentryCapture) -> None:
-    sentry_sdk.add_breadcrumb(message="starting", level="info")
-    sentry_sdk.capture_message("hello")
-    sentry_capture.flush()
-
-    [event] = sentry_capture.get_events()
-    assert event["message"] == "hello"
-    assert sentry_capture.find_breadcrumb_by_message("starting")["level"] == "info"
-```
 
 ## Inspection coverage
 
@@ -140,30 +150,33 @@ handling, including its handling of unreadable files; assert expected content.
 
 Existing `find_*` methods return the **first** match or raise `LookupError`. When a test
 requires exactly one result, filter with ordinary Python and unpack a one-element list,
-as `[event] = recorded.get_events()` does above.
+as `[event] = sentry_capture.get_events()` does above.
 
 ## Setup, ownership, and isolation
 
-| Fixture                  | Responsibility                                                                                                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sentry_transport`       | Fresh in-memory recorder with `.capture` inspection. Does not initialize or isolate Sentry, infer a client, or close application clients.                                                        |
-| `sentry_isolation_scope` | Clean SDK test environment for application-owned initialization. Clears inherited scope context and active clients; restores enclosing current/isolation scopes and global scope context/client. |
-| `sentry_capture`         | Uses that clean environment, creates a client with full transaction sampling, and yields a `SentryCapture` bound to that client for flushing. Closes its own client at teardown.                 |
+| Fixture                    | Responsibility                                                                                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sentry_transport`         | Fresh in-memory recorder with `.capture` inspection. Does not initialize or isolate Sentry, infer a client, or close application clients.                                                        |
+| `sentry_isolation_scope`   | Clean SDK test environment for application-owned initialization. Clears inherited scope context and active clients; restores enclosing current/isolation scopes and global scope context/client. |
+| `initialize_sentry_client` | Initializes the SDK with the recording transport and full transaction sampling. Override this fixture for application initialization, retaining the transport and isolation dependencies.        |
+| `sentry_client`            | Depends on initialization, yields `sentry_sdk.get_client()`, and closes that exact client at teardown using `contextlib.closing`.                                                                |
+| `sentry_capture`           | Depends on the client and transport. Exposes `.client`, `.transport`, explicit chainable `.flush()`, and passive inspection helpers.                                                             |
 
 The historical name `sentry_isolation_scope` means more than a context-local scope: it
 temporarily replaces the **global** scope as well. Nested environments restore the
-original scope objects, including their clients and session-tracking policy. Application
-code owns the flushing and closing of clients it creates, including cleanup when
-application setup fails. The fixtures never close a pre-existing client or an
-application-created replacement.
+original scope objects, including their clients and session-tracking policy. The
+`sentry_client` fixture owns the client left active by successful initialization,
+including application overrides. Initializers must clean up partial setup if they raise
+before that fixture takes ownership. Any additional or replacement clients remain
+application-owned; pre-existing enclosing clients are restored, not closed.
 
 Finish transactions, await async tasks, and join background work **before** flushing and
-inspecting. `sentry_capture.flush(timeout=...)` always flushes its bound client, even if
-application code has since replaced the active client. For application tests, flush the
-actual application client. Calling `.flush()` on a transport-only capture raises
-`RuntimeError` because there is no bound client. Manually constructed
-`SentryCapture(envelopes, client=client)` views can also bind explicit flushing; views
-never own client cleanup.
+inspecting. `sentry_capture.flush(timeout=...)` flushes its bound client, never
+whichever client happens to be active. It delegates to `sentry_capture.client.flush()`
+without taking ownership of client cleanup. For manual SDK setup without fixture
+initialization, use `sentry_transport.capture`: a passive `CapturedTelemetry` view with
+the same readers but no client binding or flush method. Flush and close your manually
+created client yourself.
 
 This supports sequential tests within a worker, not concurrent SDK reconfiguration.
 Threads and async tasks must finish while their intended test environment is active;
@@ -189,18 +202,6 @@ Capture does not prove delivery to Sentry, HTTP wire encoding, server-side proce
 or the absence of traffic from another client, an integration's separate network path,
 or other application code. This plugin is neither a runtime redaction library nor a
 process-wide network sandbox.
-
-## Compatibility changes in 0.2.0
-
-- Readers no longer implicitly flush the active client. Flush the appropriate client
-  explicitly before inspecting buffered telemetry such as SDK logs.
-- `sentry_isolation_scope` starts with clean scope context and no active client rather
-  than inheriting context or constructing a blank SDK client.
-- Existing imports, constructor calls, partial readers, mutable event views, and
-  first-match selectors remain supported. Log/attachment readers, transport `.capture`,
-  and explicitly bound flushing are additive.
-
-See [the 0.2.0 release notes](CHANGELOG.md) for migration guidance.
 
 ## Development
 

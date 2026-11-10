@@ -1,8 +1,8 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
 import sentry_sdk
+from sentry_sdk import logger
 
 from pytest_sentry_capture import FakeTransport, SentryCapture
 
@@ -19,7 +19,7 @@ class ObservedClient(sentry_sdk.Client):
         super().flush(timeout=timeout, callback=callback)
 
 
-def test_reads_are_passive_and_flush_targets_bound_client(
+def test_reads_are_passive_and_clients_are_flushed_explicitly(
     sentry_isolation_scope: None,
 ) -> None:
     owner_transport = FakeTransport()
@@ -30,12 +30,12 @@ def test_reads_are_passive_and_flush_targets_bound_client(
     other = ObservedClient(
         transport=other_transport, enable_logs=True, default_integrations=False
     )
-    capture = SentryCapture(owner_transport.captured_envelopes, client=owner)
+    capture = SentryCapture(client=owner, transport=owner_transport)
     try:
         sentry_sdk.get_global_scope().set_client(owner)
-        sentry_sdk.logger.info("owner buffered log")
+        logger.info("owner buffered log")
         sentry_sdk.get_global_scope().set_client(other)
-        sentry_sdk.logger.info("other buffered log")
+        logger.info("other buffered log")
 
         assert list(capture.get_events()) == []
         assert list(capture.get_transactions()) == []
@@ -47,7 +47,7 @@ def test_reads_are_passive_and_flush_targets_bound_client(
         assert owner.flush_timeouts == []
         assert other.flush_timeouts == []
 
-        capture.flush(timeout=0.5)
+        assert capture.flush(timeout=0.5) is capture
         assert owner.flush_timeouts == [0.5]
         assert owner_transport.captured_envelopes
         assert other.flush_timeouts == []
@@ -58,7 +58,7 @@ def test_reads_are_passive_and_flush_targets_bound_client(
         owner.close()
 
 
-def test_fixture_flush_does_not_flush_replacement_client(
+def test_capture_fixture_flush_does_not_flush_replacement_client(
     sentry_capture: SentryCapture,
 ) -> None:
     transport = FakeTransport()
@@ -67,20 +67,13 @@ def test_fixture_flush_does_not_flush_replacement_client(
     )
     try:
         sentry_sdk.get_global_scope().set_client(replacement)
-        sentry_sdk.logger.info("replacement buffered log")
+        logger.info("replacement buffered log")
         sentry_capture.flush()
         assert replacement.flush_timeouts == []
         replacement.flush()
         assert transport.captured_envelopes
     finally:
         replacement.close()
-
-
-def test_transport_only_capture_requires_explicit_client_flush(
-    sentry_transport: FakeTransport,
-) -> None:
-    with pytest.raises(RuntimeError, match="application client"):
-        sentry_transport.capture.flush()
 
 
 def test_flush_does_not_finish_transaction(sentry_capture: SentryCapture) -> None:

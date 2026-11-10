@@ -1,5 +1,6 @@
 import pytest
 import sentry_sdk
+from sentry_sdk import logger
 
 from pytest_sentry_capture import FakeTransport
 
@@ -52,7 +53,7 @@ def test_before_send_is_not_an_attachment_or_log_filter(
             bytes=secret.encode(), filename="leaking.txt"
         )
         sentry_sdk.capture_message("useful safe event")
-        sentry_sdk.logger.info(secret)
+        logger.info(secret)
         client.flush()
 
         capture = sentry_transport.capture

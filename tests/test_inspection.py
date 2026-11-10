@@ -1,9 +1,15 @@
 from pathlib import Path
 
 import sentry_sdk
+from sentry_sdk import logger
 from sentry_sdk.envelope import Envelope, Item, PayloadRef
 
-from pytest_sentry_capture import CapturedAttachment, FakeTransport, SentryCapture
+from pytest_sentry_capture import (
+    CapturedAttachment,
+    CapturedTelemetry,
+    FakeTransport,
+    SentryCapture,
+)
 
 
 def test_logs_are_flattened_in_capture_order(sentry_isolation_scope: None) -> None:
@@ -14,10 +20,10 @@ def test_logs_are_flattened_in_capture_order(sentry_isolation_scope: None) -> No
     sentry_sdk.get_global_scope().set_client(client)
     try:
         sentry_sdk.capture_message("an event, not a log")
-        sentry_sdk.logger.info("first")
-        sentry_sdk.logger.warning("second")
+        logger.info("first")
+        logger.warning("second")
         client.flush()
-        sentry_sdk.logger.error("third")
+        logger.error("third")
         client.flush()
         assert [log["body"] for log in transport.capture.get_logs()] == [
             "first",
@@ -124,7 +130,7 @@ def test_all_readers_are_non_consuming_partial_views() -> None:
             Item(type="attachment", filename="test.txt", payload=b"diagnostic bytes"),
         ],
     )
-    capture = SentryCapture([captured])
+    capture = CapturedTelemetry([captured])
     snapshot = captured.serialize()
     for reader in (
         capture.get_events,
