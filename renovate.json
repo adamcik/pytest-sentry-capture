@@ -1,4 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>adamcik/renovate-config:library"]
+  "extends": [
+    "github>adamcik/renovate-config:library",
+    "github>adamcik/renovate-config:automerge"
+  ]
 }
