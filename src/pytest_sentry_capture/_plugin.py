@@ -1,10 +1,11 @@
 """Opt-in fixtures: plugin discovery itself does not initialize the SDK."""
 
 from collections.abc import Generator, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 
 import pytest
 import sentry_sdk
+from sentry_sdk import client as sdk_client
 from sentry_sdk import scope as sdk_scope
 
 from ._capture import FakeTransport, SentryCapture
@@ -14,9 +15,9 @@ from ._capture import FakeTransport, SentryCapture
 def sentry_isolation_scope() -> Iterator[None]:
     """A clean SDK test environment, including global-client restoration.
 
-    Application-created clients remain application-owned. Scope context is reset,
-    but process-global integrations and concurrent SDK reconfiguration are not
-    isolated. Despite the historical name, this changes the global scope too.
+    Isolation alone never closes clients; sentry_client owns successful setup.
+    Scope context is reset, but process-global integrations and concurrent SDK
+    reconfiguration are not isolated. This changes the global scope too.
     """
     with _sdk_test_environment():
         yield
@@ -30,23 +31,31 @@ def sentry_transport() -> FakeTransport:
 
 @pytest.fixture
 def sentry_capture(
+    sentry_client: sdk_client.BaseClient, sentry_transport: FakeTransport
+) -> SentryCapture:
+    """Initialize Sentry for a test and expose explicit flushing and inspection."""
+    return SentryCapture(client=sentry_client, transport=sentry_transport)
+
+
+@pytest.fixture
+def initialize_sentry_client(
     sentry_transport: FakeTransport, sentry_isolation_scope: None
-) -> Iterator[SentryCapture]:
-    """Own a client in a clean SDK test environment, with full trace sampling."""
-    scope = sentry_sdk.get_global_scope()
-    previous = scope.client
-    client = sentry_sdk.Client(
-        transport=sentry_transport,
-        traces_sample_rate=1.0,
-    )
-    try:
-        scope.set_client(client)
-        yield SentryCapture(sentry_transport.captured_envelopes, client=client)
-    finally:
-        try:
-            client.close()
-        finally:
-            scope.client = previous
+) -> None:
+    """Configure the test client; override this fixture with application setup.
+
+    Keep the transport and isolation dependencies when overriding. If setup raises
+    after creating a client, the initializer must clean up that partial setup.
+    """
+    sentry_sdk.init(transport=sentry_transport, traces_sample_rate=1.0)
+
+
+@pytest.fixture
+def sentry_client(
+    initialize_sentry_client: None,
+) -> Iterator[sdk_client.BaseClient]:
+    """Own the initialized SDK client, closing that exact client at teardown."""
+    with closing(sentry_sdk.get_client()) as client:
+        yield client
 
 
 @contextmanager

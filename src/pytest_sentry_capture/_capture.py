@@ -1,10 +1,10 @@
-"""Passive envelope inspection, separate from client lifetime and flushing."""
+"""Passive envelope readers with optional client-bound, explicit flushing."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, cast, override
+from typing import Any, Self, cast, override
 
-import sentry_sdk
+from sentry_sdk import client as sdk_client
 from sentry_sdk import envelope, transport
 
 
@@ -31,42 +31,26 @@ class FakeTransport(transport.Transport):
     def __init__(self) -> None:
         super().__init__()
         self.captured_envelopes: list[envelope.Envelope] = []
-        self.capture = SentryCapture(self.captured_envelopes)
+        self.capture = CapturedTelemetry(self.captured_envelopes)
 
     @override
     def capture_envelope(self, envelope: envelope.Envelope) -> None:
         self.captured_envelopes.append(envelope)
 
 
-class SentryCapture:
+class CapturedTelemetry:
     """A live, non-consuming view of data already handed to a transport.
 
-    Reads never flush. An optional client binds explicit flushing, not ownership:
-    this view never closes clients. Convenience readers are partial views; use
-    envelopes for exhaustive inspection. Returned dictionaries remain mutable.
+    This view has no client: initialize, flush, and close clients separately.
+    Convenience readers are partial views; use envelopes for exhaustive
+    inspection. Returned dictionaries remain mutable.
     """
 
     def __init__(
         self,
         envelopes: list[envelope.Envelope],
-        *,
-        client: sentry_sdk.Client | None = None,
     ) -> None:
         self.envelopes = envelopes
-        self._client = client
-
-    def flush(self, timeout: float | None = None) -> None:
-        """Flush the bound client, never the active client.
-
-        Finish transactions and await/join application work first. Flushing only
-        drains SDK buffers; it cannot complete unfinished application work.
-        Transport-only views have no client: flush the application client instead.
-        """
-        if self._client is None:
-            raise RuntimeError(
-                "No bound client; flush your application client explicitly."
-            )
-        self._client.flush(timeout=timeout)
 
     def get_events(self) -> Iterator[dict[str, Any]]:
         """Error and message events only; not exhaustive telemetry inspection."""
@@ -149,3 +133,23 @@ class SentryCapture:
             if exception.get("type") == exception_type:
                 return exception
         raise LookupError(f"Exception with type='{exception_type}' not found.")
+
+
+class SentryCapture(CapturedTelemetry):
+    """Inspect a transport and explicitly flush its initialized SDK client.
+
+    Reads remain passive. The client reference fixes the flush target even if
+    application code replaces the active client; this view never closes it.
+    """
+
+    def __init__(
+        self, *, client: sdk_client.BaseClient, transport: FakeTransport
+    ) -> None:
+        super().__init__(transport.captured_envelopes)
+        self.client = client
+        self.transport = transport
+
+    def flush(self, timeout: float | None = None) -> Self:
+        """Drain the bound client's buffers, not unfinished application work."""
+        self.client.flush(timeout=timeout)
+        return self
