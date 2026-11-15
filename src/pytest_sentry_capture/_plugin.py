@@ -38,7 +38,7 @@ def sentry_capture(
 
 
 @pytest.fixture
-def initialize_sentry_client(
+def initialize_sentry(
     sentry_transport: FakeTransport, sentry_isolation_scope: None
 ) -> None:
     """Configure the test client; override this fixture with application setup.
@@ -51,7 +51,7 @@ def initialize_sentry_client(
 
 @pytest.fixture
 def sentry_client(
-    initialize_sentry_client: None,
+    initialize_sentry: None,
 ) -> Iterator[sdk_client.BaseClient]:
     """Own the initialized SDK client, closing that exact client at teardown."""
     with closing(sentry_sdk.get_client()) as client:

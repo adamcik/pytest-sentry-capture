@@ -7,7 +7,7 @@ from ._capture import (
     SentryCapture,
 )
 from ._plugin import (
-    initialize_sentry_client,
+    initialize_sentry,
     sentry_capture,
     sentry_client,
     sentry_isolation_scope,
@@ -19,7 +19,7 @@ __all__ = [
     "CapturedTelemetry",
     "FakeTransport",
     "SentryCapture",
-    "initialize_sentry_client",
+    "initialize_sentry",
     "sentry_capture",
     "sentry_client",
     "sentry_isolation_scope",
