@@ -37,9 +37,9 @@ def test_sdk_message(sentry_capture):
 
 Finish application work, then flush the client before inspecting buffered telemetry.
 This setup exercises SDK behavior, not your application's Sentry configuration. For
-application integration tests, override `initialize_sentry_client` as shown below. The
-same capture exposes `.client` for direct SDK access and `.transport` for raw envelopes;
-its flush target does not change if another client becomes active.
+application integration tests, override `initialize_sentry` as shown below. The same
+capture exposes `.client` for direct SDK access and `.transport` for raw envelopes; its
+flush target does not change if another client becomes active.
 
 ## Test your application's Sentry configuration
 
@@ -74,7 +74,7 @@ def initialize_application_sentry(*, transport):
 
 
 @pytest.fixture
-def initialize_sentry_client(
+def initialize_sentry(
     sentry_transport: capture.FakeTransport, sentry_isolation_scope: None
 ) -> None:
     """Override only initialization; the library still owns client cleanup."""
@@ -154,13 +154,13 @@ as `[event] = sentry_capture.get_events()` does above.
 
 ## Setup, ownership, and isolation
 
-| Fixture                    | Responsibility                                                                                                                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sentry_transport`         | Fresh in-memory recorder with `.capture` inspection. Does not initialize or isolate Sentry, infer a client, or close application clients.                                                        |
-| `sentry_isolation_scope`   | Clean SDK test environment for application-owned initialization. Clears inherited scope context and active clients; restores enclosing current/isolation scopes and global scope context/client. |
-| `initialize_sentry_client` | Initializes the SDK with the recording transport and full transaction sampling. Override this fixture for application initialization, retaining the transport and isolation dependencies.        |
-| `sentry_client`            | Depends on initialization, yields `sentry_sdk.get_client()`, and closes that exact client at teardown using `contextlib.closing`.                                                                |
-| `sentry_capture`           | Depends on the client and transport. Exposes `.client`, `.transport`, explicit chainable `.flush()`, and passive inspection helpers.                                                             |
+| Fixture                  | Responsibility                                                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sentry_transport`       | Fresh in-memory recorder with `.capture` inspection. Does not initialize or isolate Sentry, infer a client, or close application clients.                                                        |
+| `sentry_isolation_scope` | Clean SDK test environment for application-owned initialization. Clears inherited scope context and active clients; restores enclosing current/isolation scopes and global scope context/client. |
+| `initialize_sentry`      | Initializes the SDK with the recording transport and full transaction sampling. Override this fixture for application initialization, retaining the transport and isolation dependencies.        |
+| `sentry_client`          | Depends on initialization, yields `sentry_sdk.get_client()`, and closes that exact client at teardown using `contextlib.closing`.                                                                |
+| `sentry_capture`         | Depends on the client and transport. Exposes `.client`, `.transport`, explicit chainable `.flush()`, and passive inspection helpers.                                                             |
 
 The historical name `sentry_isolation_scope` means more than a context-local scope: it
 temporarily replaces the **global** scope as well. Nested environments restore the

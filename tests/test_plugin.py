@@ -23,7 +23,7 @@ def test_application_can_override_only_initialization(
             assert client.transport is None
 
         @pytest.fixture
-        def initialize_sentry_client(sentry_transport, sentry_isolation_scope):
+        def initialize_sentry(sentry_transport, sentry_isolation_scope):
             def before_send(event, hint):
                 event.setdefault("tags", {})["application"] = "configured"
                 return event

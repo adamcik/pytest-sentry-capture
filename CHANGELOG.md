@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Compose capture from overridable initialization and library-owned client cleanup:
-  `sentry_capture` depends on `sentry_client`, which depends on
-  `initialize_sentry_client`. Applications override only initialization.
+  `sentry_capture` depends on `sentry_client`, which depends on `initialize_sentry`.
+  Applications override only initialization.
 - Expose `.client` and `.transport` on `SentryCapture`. Its explicit `.flush()` targets
   the bound client and returns the capture for chaining; readers remain passive.
 - Keep transport-only inspection separate as `CapturedTelemetry`, exposed through
