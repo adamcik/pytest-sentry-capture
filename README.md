@@ -154,6 +154,11 @@ as `[event] = sentry_capture.get_events()` does above.
 
 ## Setup, ownership, and isolation
 
+After `initialize_sentry` returns, `sentry_sdk.get_client()` must be active and its
+`.transport` must be the exact supplied `sentry_transport`. The initializer's return
+value is unused. The `sentry_client` fixture validates these conditions before yielding;
+invalid initialization fails test setup and still closes the acquired client.
+
 | Fixture                  | Responsibility                                                                                                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sentry_transport`       | Fresh in-memory recorder with `.capture` inspection. Does not initialize or isolate Sentry, infer a client, or close application clients.                                                        |
