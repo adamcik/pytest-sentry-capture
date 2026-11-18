@@ -5,6 +5,78 @@ import pytest
 pytest_plugins = ["pytester"]
 
 
+@pytest.mark.parametrize("setup", ["missing", "closed", "wrong-transport"])
+def test_client_rejects_invalid_initialization(
+    pytester: pytest.Pytester, setup: str
+) -> None:
+    pytester.makeconftest(
+        f"SETUP = {setup!r}\n"
+        + dedent("""
+        import pytest
+        import sentry_sdk
+        from pytest_sentry_capture import FakeTransport
+
+        initialized = []
+        closed = []
+
+        @pytest.fixture(scope="session", autouse=True)
+        def enclosing_client():
+            scope = sentry_sdk.get_global_scope()
+            previous = scope.client
+            outer = sentry_sdk.Client(
+                transport=FakeTransport(), default_integrations=False
+            )
+            scope.set_client(outer)
+            try:
+                yield
+                assert sentry_sdk.get_client() is outer
+                assert outer.is_active()
+                assert outer.transport is not None
+                assert closed == initialized
+                assert all(client.transport is None for client in initialized)
+            finally:
+                outer.close()
+                scope.client = previous
+
+        @pytest.fixture
+        def initialize_sentry(sentry_transport, sentry_isolation_scope):
+            if SETUP == "missing":
+                return
+            sentry_sdk.init(
+                transport=(
+                    FakeTransport() if SETUP == "wrong-transport" else sentry_transport
+                ),
+                default_integrations=False,
+            )
+            client = sentry_sdk.get_client()
+            initialized.append(client)
+            real_close = client.close
+            if SETUP == "closed":
+                real_close()
+
+            def close():
+                closed.append(client)
+                real_close()
+
+            client.close = close
+        """)
+    )
+    pytester.makepyfile(
+        """
+        def test_body_must_not_run(sentry_capture):
+            raise AssertionError("invalid setup reached the test body")
+        """
+    )
+    result = pytester.runpytest_subprocess("-q")
+    result.assert_outcomes(errors=1)
+    message = (
+        "*initialize_sentry must use the supplied sentry_transport*"
+        if setup == "wrong-transport"
+        else "*initialize_sentry must leave an active Sentry SDK client*"
+    )
+    result.stdout.fnmatch_lines([message])
+
+
 @pytest.mark.parametrize("client_first", [False, True])
 def test_application_can_override_only_initialization(
     pytester: pytest.Pytester, client_first: bool

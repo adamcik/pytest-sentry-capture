@@ -43,18 +43,33 @@ def initialize_sentry(
 ) -> None:
     """Configure the test client; override this fixture with application setup.
 
-    Keep the transport and isolation dependencies when overriding. If setup raises
-    after creating a client, the initializer must clean up that partial setup.
+    Keep the transport and isolation dependencies when overriding. Successful
+    setup must leave an active sentry_sdk.get_client() whose transport is the
+    supplied sentry_transport; the initializer's return value is unused. If setup
+    raises after creating a client, clean up that partial setup locally.
     """
     sentry_sdk.init(transport=sentry_transport, traces_sample_rate=1.0)
 
 
 @pytest.fixture
 def sentry_client(
+    sentry_transport: FakeTransport,
     initialize_sentry: None,
 ) -> Iterator[sdk_client.BaseClient]:
-    """Own the initialized SDK client, closing that exact client at teardown."""
+    """Validate and own the initialized client, including cleanup on rejection."""
     with closing(sentry_sdk.get_client()) as client:
+        transport = getattr(client, "transport", None)
+        # The SDK can still report is_active() after close() removes its transport.
+        if not client.is_active() or transport is None:
+            pytest.fail(
+                "initialize_sentry must leave an active Sentry SDK client",
+                pytrace=False,
+            )
+        if transport is not sentry_transport:
+            pytest.fail(
+                "initialize_sentry must use the supplied sentry_transport",
+                pytrace=False,
+            )
         yield client
 
 

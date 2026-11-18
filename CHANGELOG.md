@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Validate initializer overrides before tests run: the SDK client must be active and use
+  the supplied transport. Rejected clients are still closed.
 - Compose capture from overridable initialization and library-owned client cleanup:
   `sentry_capture` depends on `sentry_client`, which depends on `initialize_sentry`.
   Applications override only initialization.
