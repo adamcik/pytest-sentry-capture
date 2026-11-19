@@ -81,9 +81,7 @@ def initialize_sentry(
     initialize_application_sentry(transport=sentry_transport)
 
 
-def test_application_privacy(
-    sentry_capture: capture.SentryCapture
-) -> None:
+def test_application_privacy(sentry_capture: capture.SentryCapture) -> None:
     email = "invented-secret@example.invalid"
     authorization = "invented-bearer-secret-123"
     # In a real application test, invoke the application operation here.
