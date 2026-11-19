@@ -1,6 +1,19 @@
 # Release notes
 
-## Unreleased
+## 0.3.0 — 2026-11-19
+
+### Breaking changes
+
+- Replace `SentryCapture(envelopes)` with `CapturedTelemetry(envelopes)` for raw
+  envelope inspection without a client.
+- Construct client-bound captures with
+  `SentryCapture(client=client, transport=transport)`, not an envelope list and an
+  optional client.
+- `sentry_transport.capture` now returns passive `CapturedTelemetry` and no longer has
+  `.flush()`. Flush the owning SDK client directly, or use the `sentry_capture` fixture
+  for client-bound flushing.
+
+### Initialization and inspection
 
 - Validate initializer overrides before tests run: the SDK client must be active and use
   the supplied transport. Rejected clients are still closed.
@@ -9,8 +22,6 @@
   Applications override only initialization.
 - Expose `.client` and `.transport` on `SentryCapture`. Its explicit `.flush()` targets
   the bound client and returns the capture for chaining; readers remain passive.
-- Keep transport-only inspection separate as `CapturedTelemetry`, exposed through
-  `sentry_transport.capture`, without client binding or flushing.
 
 ## 0.2.0 — 2026-10-23
 
